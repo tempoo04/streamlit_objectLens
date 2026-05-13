@@ -36,6 +36,7 @@ else:
             params["model_key"],
             params["score_thresh"],
             params["mask_thresh"],
+            params["sam_quality"],
         )
 
     df, objects = compute_features(detections)
@@ -51,7 +52,7 @@ else:
         with col_img:
             st.markdown('<p class="section-label">Annotated image</p>', unsafe_allow_html=True)
             overlay = render_overlay(img_np, objects, params["color_by"])
-            st.image(overlay, use_container_width=True)
+            st.image(overlay, use_column_width=True)
 
         with col_chart:
             metric = params["chart_metric"]

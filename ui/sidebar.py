@@ -1,10 +1,16 @@
 import streamlit as st
-from core.model import MODELS
+from core.model import MODELS, _SAM_PRESETS
 
 # model-specific tips shown below the selector
 _MODEL_INFO = {
-    "maskrcnn101": "Mask R-CNN ResNet-50 FPN v2 · torchvision<br>COCO pretrained · class-aware · fast",
-    "sam_vitb":    "SAM ViT-B · Meta AI<br>class-agnostic · segments anything<br>weights ~375 MB, downloaded once<br>runs at 512 px input for CPU speed",
+    "maskrcnn_r50v2": "Mask R-CNN ResNet-50 FPN v2 · torchvision<br>COCO pretrained · class-aware · fast",
+    "sam_vitb":    "SAM ViT-B · Meta AI<br>class-agnostic · segments anything<br>weights ~375 MB, downloaded once",
+}
+
+_SAM_QUALITY_LABELS = {
+    "fast":     "Fast — 256 px · 36 pts  (low RAM, ~2–4 s)",
+    "balanced": "Balanced — 384 px · 100 pts  (~6–10 s)",
+    "quality":  "Quality — 512 px · 144 pts  (original)",
 }
 
 
@@ -33,6 +39,16 @@ def render_sidebar() -> dict:
             f'<div class="info-box">{_MODEL_INFO[model_key]}</div>',
             unsafe_allow_html=True,
         )
+
+        sam_quality = "fast"
+        if model_key == "sam_vitb":
+            st.markdown('<p class="section-label">SAM quality</p>', unsafe_allow_html=True)
+            sam_quality = st.selectbox(
+                "SAM quality",
+                options=list(_SAM_QUALITY_LABELS.keys()),
+                format_func=lambda x: _SAM_QUALITY_LABELS[x],
+                label_visibility="collapsed",
+            )
 
         # ── detection thresholds ───────────────────────────────────────────
         st.markdown('<p class="section-label">Detection</p>', unsafe_allow_html=True)
@@ -71,6 +87,7 @@ def render_sidebar() -> dict:
     return {
         "uploaded":     uploaded,
         "model_key":    model_key,
+        "sam_quality":  sam_quality,
         "score_thresh": score_thresh,
         "mask_thresh":  mask_thresh,
         "color_by":     color_by,

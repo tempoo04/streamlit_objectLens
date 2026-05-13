@@ -20,7 +20,7 @@ import streamlit as st
 
 # ── registry ──────────────────────────────────────────────────────────────────
 MODELS: dict[str, str] = {
-    "Mask R-CNN ResNet-50 v2  (accurate)": "maskrcnn101",
+    "Mask R-CNN ResNet-50 v2  (accurate)": "maskrcnn_r50v2",
     "SAM ViT-B  (segment anything)":     "sam_vitb",
 }
 
@@ -28,7 +28,7 @@ MODELS: dict[str, str] = {
 # Mask R-CNN ResNet-50 FPN v2
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
-def _load_maskrcnn101():
+def _load_maskrcnn_r50v2():
     from torchvision.models.detection import (
         maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights,
     )
@@ -38,14 +38,14 @@ def _load_maskrcnn101():
     return model, weights.meta["categories"]
 
 
-def _infer_maskrcnn101(
+def _infer_maskrcnn_r50v2(
     img_np: np.ndarray,
     score_thresh: float,
     mask_thresh: float,
 ) -> list[dict]:
     import torch, torchvision
 
-    model, categories = _load_maskrcnn101()
+    model, categories = _load_maskrcnn_r50v2()
     tensor = torchvision.transforms.functional.to_tensor(Image.fromarray(img_np))
     with torch.no_grad():
         out = model([tensor])[0]
@@ -180,12 +180,12 @@ def _infer_sam_vitb(
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 _LOADERS = {
-    "maskrcnn101": _load_maskrcnn101,
+    "maskrcnn_r50v2": _load_maskrcnn_r50v2,
     "sam_vitb":    _load_sam_vitb,
 }
 
 _INFER = {
-    "maskrcnn101": _infer_maskrcnn101,
+    "maskrcnn_r50v2": _infer_maskrcnn_r50v2,
     "sam_vitb":    _infer_sam_vitb,
 }
 
