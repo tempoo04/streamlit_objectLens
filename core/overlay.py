@@ -56,15 +56,14 @@ def render_overlay(img_np: np.ndarray, objects: list, color_by: str) -> np.ndarr
 
         mask_3ch = mask[:, :, np.newaxis]
         overlay  = np.where(mask_3ch, overlay * 0.45 + color * 0.55, overlay)
-        overlay  = overlay.astype(np.uint8).astype(np.float32)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         rgb = (int(color[0]), int(color[1]), int(color[2]))
-        cv2.drawContours(overlay.astype(np.uint8), contours, -1, rgb, 2)
 
         cx = int((mask * np.arange(mask.shape[1])[np.newaxis, :]).sum() / (mask.sum() + 1e-6))
         cy = int((mask * np.arange(mask.shape[0])[:, np.newaxis]).sum() / (mask.sum() + 1e-6))
         tmp = overlay.astype(np.uint8)
+        cv2.drawContours(tmp, contours, -1, rgb, 2)
         cv2.putText(tmp, str(obj["id"]), (cx - 5, cy + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
         overlay = tmp.astype(np.float32)

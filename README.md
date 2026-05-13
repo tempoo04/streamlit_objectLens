@@ -1,8 +1,6 @@
 # StreamLENS 🔬
 
-Upload a photo of small objects — coins, seeds, pills, screws, fruits — and ObjectLens will detect, segment, and measure every instance using **Mask R-CNN (ResNet-50 FPN)** pretrained on COCO.
-
-> Add a demo GIF here once you run it locally.
+Upload a photo of small objects — coins, seeds, pills, screws, fruits — and ObjectLens will detect, segment, and measure every instance using **Mask R-CNN ResNet-50 FPN v2** or **SAM ViT-B**, both pretrained on COCO/SA-1B.
 
 ---
 
@@ -16,7 +14,7 @@ Upload a photo of small objects — coins, seeds, pills, screws, fruits — and 
 
 ---
 
-Model weights (~170 MB) download automatically on first run.
+Mask R-CNN weights (~170 MB) download automatically via torchvision on first run. SAM ViT-B weights (~375 MB) download once to `weights/`.
 
 ---
 
@@ -50,7 +48,7 @@ objectlens/
 
 ## Stack
 
-`streamlit` · `torchvision` · `opencv-python` · `pandas` · `plotly`
+`streamlit` · `torchvision` · `segment-anything` · `opencv-python` · `pandas` · `plotly`
 
 ---
 

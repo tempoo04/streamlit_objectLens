@@ -1,5 +1,5 @@
 """
-core/model.py — model registry (Mask R-CNN · SAM ViT-B)
+core/model.py — model registry (Mask R-CNN ResNet-50 FPN v2 · SAM ViT-B)
 
 Detection dict schema returned by all inference functions:
     {
@@ -20,12 +20,12 @@ import streamlit as st
 
 # ── registry ──────────────────────────────────────────────────────────────────
 MODELS: dict[str, str] = {
-    "Mask R-CNN ResNet-101  (accurate)": "maskrcnn101",
+    "Mask R-CNN ResNet-50 v2  (accurate)": "maskrcnn101",
     "SAM ViT-B  (segment anything)":     "sam_vitb",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Mask R-CNN ResNet-101
+# Mask R-CNN ResNet-50 FPN v2
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
 def _load_maskrcnn101():
@@ -74,18 +74,26 @@ def _infer_maskrcnn101(
 # ─────────────────────────────────────────────────────────────────────────────
 # SAM ViT-B — optimised for CPU / weak machines
 #
-# Speed knobs (weakest → strongest effect):
-#   points_per_side   : 12  → 144 grid points   (vs 32²=1024 default)
-#   _SAM_INPUT_SIZE   : 512 → ViT encoder input  (vs 1024 default, ~4× faster)
-#   crop_n_layers     : 0   → no multi-scale crops (was the main memory killer)
+# Three presets trade quality for speed/RAM:
+#   fast     : 256 px input,  6² = 36  points  (~2–4 s on CPU, low RAM)
+#   balanced : 384 px input, 10² = 100 points  (~6–10 s on CPU)
+#   quality  : 512 px input, 12² = 144 points  (original setting)
+#
+# crop_n_layers=0 stays fixed across all presets — was the main memory killer.
 # ─────────────────────────────────────────────────────────────────────────────
-_SAM_INPUT_SIZE = 512   # resize longest side to this before encoding
+_SAM_PRESETS: dict[str, dict] = {
+    "fast":     {"input_size": 256, "points_per_side": 6,  "points_per_batch": 8},
+    "balanced": {"input_size": 384, "points_per_side": 10, "points_per_batch": 16},
+    "quality":  {"input_size": 512, "points_per_side": 12, "points_per_batch": 32},
+}
 
 
 @st.cache_resource
-def _load_sam_vitb():
+def _load_sam_vitb(quality: str = "fast"):
     from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
     import urllib.request, os, torch
+
+    cfg = _SAM_PRESETS[quality]
 
     # Store weights next to this file so path is always stable on Windows
     weights_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "weights"))
@@ -103,27 +111,21 @@ def _load_sam_vitb():
 
     generator = SamAutomaticMaskGenerator(
         sam,
-        points_per_side=12,           # 144 points — good balance on CPU
-        points_per_batch=32,          # process points in small batches → lower peak RAM
+        points_per_side=cfg["points_per_side"],
+        points_per_batch=cfg["points_per_batch"],
         pred_iou_thresh=0.82,
         stability_score_thresh=0.90,
         box_nms_thresh=0.70,
-        min_mask_region_area=200,     # filter tiny noise masks early
-        crop_n_layers=0,              # no multi-scale cropping
+        min_mask_region_area=200,
+        crop_n_layers=0,
         crop_n_points_downscale_factor=1,
     )
-    return generator
+    return generator, cfg["input_size"]
 
 
-def _resize_for_sam(img_np: np.ndarray) -> tuple[np.ndarray, float]:
-    """
-    Downscale so the longest side == _SAM_INPUT_SIZE.
-    Returns (resized_image, scale_factor).
-    scale_factor < 1 means we shrank the image.
-    Never upscales.
-    """
-    H, W   = img_np.shape[:2]
-    scale  = min(_SAM_INPUT_SIZE / max(H, W), 1.0)
+def _resize_for_sam(img_np: np.ndarray, input_size: int) -> tuple[np.ndarray, float]:
+    H, W  = img_np.shape[:2]
+    scale = min(input_size / max(H, W), 1.0)
     if scale == 1.0:
         return img_np, 1.0
     new_W, new_H = int(W * scale), int(H * scale)
@@ -137,12 +139,13 @@ def _infer_sam_vitb(
     img_np: np.ndarray,
     score_thresh: float,
     mask_thresh: float,   # not used — SAM masks are already binary
+    quality: str = "fast",
 ) -> list[dict]:
     import cv2
 
-    generator          = _load_sam_vitb()
-    img_small, scale   = _resize_for_sam(img_np)
-    orig_H, orig_W     = img_np.shape[:2]
+    generator, input_size  = _load_sam_vitb(quality)
+    img_small, scale       = _resize_for_sam(img_np, input_size)
+    orig_H, orig_W         = img_np.shape[:2]
 
     masks_out = generator.generate(img_small)
 
@@ -198,11 +201,15 @@ def run_inference(
     model_key: str,
     score_thresh: float,
     mask_thresh: float,
+    sam_quality: str = "fast",
 ) -> tuple[np.ndarray, list[dict]]:
     """
     Unified inference entry point. Result is cached by (image, model, thresholds).
     Changing overlay color or chart metric never re-runs inference.
     """
-    img_np     = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    detections = _INFER[model_key](img_np, score_thresh, mask_thresh)
+    img_np = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+    if model_key == "sam_vitb":
+        detections = _infer_sam_vitb(img_np, score_thresh, mask_thresh, sam_quality)
+    else:
+        detections = _INFER[model_key](img_np, score_thresh, mask_thresh)
     return img_np, detections

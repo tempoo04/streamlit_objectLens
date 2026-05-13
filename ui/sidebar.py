@@ -3,7 +3,7 @@ from core.model import MODELS
 
 # model-specific tips shown below the selector
 _MODEL_INFO = {
-    "maskrcnn101": "Mask R-CNN ResNet-101 · torchvision<br>COCO pretrained · class-aware · fast",
+    "maskrcnn101": "Mask R-CNN ResNet-50 FPN v2 · torchvision<br>COCO pretrained · class-aware · fast",
     "sam_vitb":    "SAM ViT-B · Meta AI<br>class-agnostic · segments anything<br>weights ~375 MB, downloaded once<br>runs at 512 px input for CPU speed",
 }
 
