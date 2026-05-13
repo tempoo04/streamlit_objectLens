@@ -51,6 +51,3 @@ objectlens/
 `streamlit` · `torchvision` · `segment-anything` · `opencv-python` · `pandas` · `plotly`
 
 ---
-
-**Author:** Turgut Nasrullayev — [LinkedIn](https://linkedin.com/in/turgut-nasrullayev-735047158/) · [GitHub](https://github.com/tempoo04)  
-**License:** MIT
