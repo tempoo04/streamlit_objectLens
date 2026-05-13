@@ -1,24 +1,15 @@
 """
-core/model.py — unified model registry
+core/model.py — model registry (Mask R-CNN · SAM ViT-B)
 
-Each model exposes the same interface:
-    load_<name>()  →  cached resource
-    infer_<name>(img_np, score_thresh, mask_thresh)  →  list of detection dicts
-
-Detection dict schema (all models must return this):
+Detection dict schema returned by all inference functions:
     {
         "id":          int,
         "category":    str,
-        "score":       float,   # 0–1 confidence (SAM uses predicted_iou)
-        "box":         [x1,y1,x2,y2],
-        "mask_raw":    np.ndarray (H,W) float,
+        "score":       float,
+        "box":         [x1, y1, x2, y2],
+        "mask_raw":    np.ndarray (H, W) float32,
         "mask_thresh": float,
     }
-
-Public entry points:
-    MODELS          — ordered dict of {display_name: key}
-    load_model(key) — returns cached model object(s)
-    run_inference(image_bytes, model_key, score_thresh, mask_thresh)
 """
 
 from __future__ import annotations
@@ -31,7 +22,6 @@ import streamlit as st
 MODELS: dict[str, str] = {
     "Mask R-CNN ResNet-101  (accurate)": "maskrcnn101",
     "SAM ViT-B  (segment anything)":     "sam_vitb",
-    "YOLO11-seg  (fastest)":             "yolo11",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,16 +46,14 @@ def _infer_maskrcnn101(
     import torch, torchvision
 
     model, categories = _load_maskrcnn101()
-    tensor = torchvision.transforms.functional.to_tensor(
-        Image.fromarray(img_np)
-    )
+    tensor = torchvision.transforms.functional.to_tensor(Image.fromarray(img_np))
     with torch.no_grad():
         out = model([tensor])[0]
 
     boxes  = out["boxes"].numpy()
     scores = out["scores"].numpy()
     labels = out["labels"].numpy()
-    masks  = out["masks"].numpy()          # (N,1,H,W)
+    masks  = out["masks"].numpy()   # (N, 1, H, W)
 
     keep = scores >= score_thresh
     detections = []
@@ -84,15 +72,27 @@ def _infer_maskrcnn101(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SAM ViT-B  (automatic mask generator — no prompts needed)
+# SAM ViT-B — optimised for CPU / weak machines
+#
+# Speed knobs (weakest → strongest effect):
+#   points_per_side   : 12  → 144 grid points   (vs 32²=1024 default)
+#   _SAM_INPUT_SIZE   : 512 → ViT encoder input  (vs 1024 default, ~4× faster)
+#   crop_n_layers     : 0   → no multi-scale crops (was the main memory killer)
 # ─────────────────────────────────────────────────────────────────────────────
+_SAM_INPUT_SIZE = 512   # resize longest side to this before encoding
+
+
 @st.cache_resource
 def _load_sam_vitb():
     from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
     import urllib.request, os, torch
 
-    ckpt = "sam_vit_b_01ec64.pth"
+    # Store weights next to this file so path is always stable on Windows
+    weights_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "weights"))
+    os.makedirs(weights_dir, exist_ok=True)
+    ckpt = os.path.join(weights_dir, "sam_vit_b_01ec64.pth")
     url  = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+
     if not os.path.exists(ckpt):
         with st.spinner("Downloading SAM ViT-B weights (~375 MB) — once only…"):
             urllib.request.urlretrieve(url, ckpt)
@@ -100,105 +100,76 @@ def _load_sam_vitb():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     sam    = sam_model_registry["vit_b"](checkpoint=ckpt)
     sam.to(device)
-    # CPU-safe settings:
-    # points_per_side=16  -> 256 points instead of 1024 (4x faster)
-    # crop_n_layers=0     -> skip multi-scale cropping (main memory killer)
+
     generator = SamAutomaticMaskGenerator(
         sam,
-        points_per_side=16,
+        points_per_side=12,           # 144 points — good balance on CPU
+        points_per_batch=32,          # process points in small batches → lower peak RAM
         pred_iou_thresh=0.82,
         stability_score_thresh=0.90,
-        min_mask_region_area=150,
-        crop_n_layers=0,
+        box_nms_thresh=0.70,
+        min_mask_region_area=200,     # filter tiny noise masks early
+        crop_n_layers=0,              # no multi-scale cropping
         crop_n_points_downscale_factor=1,
     )
     return generator
 
 
+def _resize_for_sam(img_np: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    Downscale so the longest side == _SAM_INPUT_SIZE.
+    Returns (resized_image, scale_factor).
+    scale_factor < 1 means we shrank the image.
+    Never upscales.
+    """
+    H, W   = img_np.shape[:2]
+    scale  = min(_SAM_INPUT_SIZE / max(H, W), 1.0)
+    if scale == 1.0:
+        return img_np, 1.0
+    new_W, new_H = int(W * scale), int(H * scale)
+    resized = np.array(
+        Image.fromarray(img_np).resize((new_W, new_H), Image.BILINEAR)
+    )
+    return resized, scale
+
+
 def _infer_sam_vitb(
     img_np: np.ndarray,
     score_thresh: float,
-    mask_thresh: float,   # used as min stability score override
+    mask_thresh: float,   # not used — SAM masks are already binary
 ) -> list[dict]:
-    generator = _load_sam_vitb()
-    masks_out = generator.generate(img_np)   # list of mask dicts
+    import cv2
 
-    H, W = img_np.shape[:2]
+    generator          = _load_sam_vitb()
+    img_small, scale   = _resize_for_sam(img_np)
+    orig_H, orig_W     = img_np.shape[:2]
+
+    masks_out = generator.generate(img_small)
+
+    # Filter by score first — avoids resizing masks we'll discard anyway
+    masks_out = [m for m in masks_out if m["predicted_iou"] >= score_thresh]
+
     detections = []
     for i, m in enumerate(masks_out):
-        score = float(m["predicted_iou"])
-        if score < score_thresh:
-            continue
-        seg   = m["segmentation"].astype(np.uint8)   # bool → uint8
-        bbox  = m["bbox"]                             # [x, y, w, h] XYWH
-        x, y, w, h = bbox
+        seg  = m["segmentation"].astype(np.uint8)   # bool → uint8, still at small size
+        x, y, w, h = m["bbox"]                      # XYWH in small-image space
+
+        # Single cv2.resize call per mask (much faster than PIL in a loop)
+        mask_full = cv2.resize(
+            seg, (orig_W, orig_H), interpolation=cv2.INTER_NEAREST
+        ).astype(np.float32)
+
+        # Scale bbox back to original image space
+        inv = 1.0 / scale
         detections.append({
             "id":          i + 1,
-            "category":    "object",          # SAM is class-agnostic
-            "score":       score,
-            "box":         [x, y, x + w, y + h],
-            "mask_raw":    seg.astype(np.float32),
-            "mask_thresh": 0.5,               # already binary
+            "category":    "object",
+            "score":       float(m["predicted_iou"]),
+            "box":         [x * inv, y * inv, (x + w) * inv, (y + h) * inv],
+            "mask_raw":    mask_full,
+            "mask_thresh": 0.5,
         })
-    return detections
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# YOLO11-seg
-# ─────────────────────────────────────────────────────────────────────────────
-@st.cache_resource
-def _load_yolo11():
-    from ultralytics import YOLO
-    import os
-
-    # Store weights in a fixed local folder next to this file so Windows
-    # can always resolve the path, regardless of the working directory.
-    weights_dir  = os.path.join(os.path.dirname(__file__), "..", "weights")
-    weights_path = os.path.join(weights_dir, "yolo11n-seg.pt")
-    os.makedirs(weights_dir, exist_ok=True)
-
-    # On first run Ultralytics downloads the file; we tell it exactly where.
-    return YOLO(weights_path if os.path.exists(weights_path) else "yolo11n-seg.pt",
-                task="segment")
-
-
-def _infer_yolo11(
-    img_np: np.ndarray,
-    score_thresh: float,
-    mask_thresh: float,
-) -> list[dict]:
-    model   = _load_yolo11()
-    results = model(img_np, conf=score_thresh, verbose=False)[0]
-
-    detections = []
-    if results.masks is None:
-        return detections
-
-    masks  = results.masks.data.cpu().numpy()   # (N, H, W)
-    boxes  = results.boxes
-    names  = model.names
-
-    for i, (mask, box) in enumerate(zip(masks, boxes)):
-        score = float(box.conf[0])
-        cls   = int(box.cls[0])
-        xyxy  = box.xyxy[0].tolist()
-
-        # YOLO masks are resized to input size; upsample to original if needed
-        if mask.shape != img_np.shape[:2]:
-            from PIL import Image as PILImage
-            mask_pil = PILImage.fromarray((mask * 255).astype(np.uint8)).resize(
-                (img_np.shape[1], img_np.shape[0]), PILImage.NEAREST
-            )
-            mask = np.array(mask_pil).astype(np.float32) / 255.0
-
-        detections.append({
-            "id":          i + 1,
-            "category":    names[cls],
-            "score":       score,
-            "box":         xyxy,
-            "mask_raw":    mask,
-            "mask_thresh": mask_thresh,
-        })
     return detections
 
 
@@ -208,18 +179,16 @@ def _infer_yolo11(
 _LOADERS = {
     "maskrcnn101": _load_maskrcnn101,
     "sam_vitb":    _load_sam_vitb,
-    "yolo11":      _load_yolo11,
 }
 
 _INFER = {
     "maskrcnn101": _infer_maskrcnn101,
     "sam_vitb":    _infer_sam_vitb,
-    "yolo11":      _infer_yolo11,
 }
 
 
 def load_model(key: str):
-    """Pre-warm the selected model (optional — inference also triggers load)."""
+    """Pre-warm the selected model. Optional — inference also triggers load."""
     return _LOADERS[key]()
 
 
@@ -231,9 +200,9 @@ def run_inference(
     mask_thresh: float,
 ) -> tuple[np.ndarray, list[dict]]:
     """
-    Unified inference entry point. Cached by (image, model, thresholds).
-    Switching the overlay color metric never re-runs inference.
+    Unified inference entry point. Result is cached by (image, model, thresholds).
+    Changing overlay color or chart metric never re-runs inference.
     """
-    img_np = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+    img_np     = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
     detections = _INFER[model_key](img_np, score_thresh, mask_thresh)
     return img_np, detections
