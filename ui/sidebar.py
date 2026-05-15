@@ -4,7 +4,8 @@ from core.model import MODELS, _SAM_PRESETS
 # model-specific tips shown below the selector
 _MODEL_INFO = {
     "maskrcnn_r50v2": "Mask R-CNN ResNet-50 FPN v2 · torchvision<br>COCO pretrained · class-aware · fast",
-    "sam_vitb":    "SAM ViT-B · Meta AI<br>class-agnostic · segments anything<br>weights ~375 MB, downloaded once",
+    "sam_vitb":       "SAM ViT-B · Meta AI<br>class-agnostic · segments anything<br>weights ~375 MB, downloaded once",
+    "sam2_small":     "SAM2 Hiera-S · Meta AI<br>class-agnostic · better masks than SAM1<br>weights ~183 MB via HuggingFace, once",
 }
 
 _SAM_QUALITY_LABELS = {
@@ -41,7 +42,7 @@ def render_sidebar() -> dict:
         )
 
         sam_quality = "fast"
-        if model_key == "sam_vitb":
+        if model_key in ("sam_vitb", "sam2_small"):
             st.markdown('<p class="section-label">SAM quality</p>', unsafe_allow_html=True)
             sam_quality = st.selectbox(
                 "SAM quality",
