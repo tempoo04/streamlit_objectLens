@@ -17,6 +17,7 @@ import io
 import numpy as np
 from PIL import Image
 import streamlit as st
+import torchvision  # must be fully initialized before sam2 imports torchvision.ops.boxes
 
 # ── registry ──────────────────────────────────────────────────────────────────
 MODELS: dict[str, str] = {
