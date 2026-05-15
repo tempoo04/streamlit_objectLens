@@ -1,5 +1,5 @@
 """
-core/model.py — model registry (Mask R-CNN ResNet-50 FPN v2 · SAM ViT-B)
+core/model.py — model registry (Mask R-CNN ResNet-50 FPN v2 · SAM ViT-B · SAM2 Hiera-S)
 
 Detection dict schema returned by all inference functions:
     {
@@ -21,7 +21,8 @@ import streamlit as st
 # ── registry ──────────────────────────────────────────────────────────────────
 MODELS: dict[str, str] = {
     "Mask R-CNN ResNet-50 v2  (accurate)": "maskrcnn_r50v2",
-    "SAM ViT-B  (segment anything)":     "sam_vitb",
+    "SAM ViT-B  (segment anything)":       "sam_vitb",
+    "SAM2 Hiera-S  (better quality)":      "sam2_small",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -177,16 +178,88 @@ def _infer_sam_vitb(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SAM2 Hiera-Small  (facebook/sam2.1-hiera-small  ~183 MB via HuggingFace)
+#
+# Uses the same _SAM_PRESETS and _resize_for_sam as SAM ViT-B.
+# SAM2AutomaticMaskGenerator output dict is identical to SAM1's.
+# torch.compile is suppressed — avoids Windows build failures.
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_resource
+def _load_sam2(quality: str = "fast"):
+    from sam2.build_sam import build_sam2_hf
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+    import torch
+
+    # Suppress torch.compile — can fail on Windows without MSVC
+    torch._dynamo.config.suppress_errors = True
+
+    cfg    = _SAM_PRESETS[quality]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    with st.spinner("Loading SAM2 weights (~183 MB, once only)…"):
+        sam2 = build_sam2_hf("facebook/sam2.1-hiera-small", device=device)
+
+    generator = SAM2AutomaticMaskGenerator(
+        sam2,
+        points_per_side=cfg["points_per_side"],
+        points_per_batch=cfg["points_per_batch"],
+        pred_iou_thresh=0.80,
+        stability_score_thresh=0.88,
+        box_nms_thresh=0.70,
+        min_mask_region_area=200,
+        crop_n_layers=0,
+        crop_n_points_downscale_factor=1,
+    )
+    return generator, cfg["input_size"]
+
+
+def _infer_sam2(
+    img_np: np.ndarray,
+    score_thresh: float,
+    mask_thresh: float,   # not used — SAM2 masks are already binary
+    quality: str = "fast",
+) -> list[dict]:
+    import cv2
+
+    generator, input_size = _load_sam2(quality)
+    img_small, scale      = _resize_for_sam(img_np, input_size)
+    orig_H, orig_W        = img_np.shape[:2]
+
+    masks_out = generator.generate(img_small)
+    masks_out = [m for m in masks_out if m["predicted_iou"] >= score_thresh]
+
+    detections = []
+    for i, m in enumerate(masks_out):
+        seg  = m["segmentation"].astype(np.uint8)
+        x, y, w, h = m["bbox"]
+        mask_full = cv2.resize(
+            seg, (orig_W, orig_H), interpolation=cv2.INTER_NEAREST
+        ).astype(np.float32)
+        inv = 1.0 / scale
+        detections.append({
+            "id":          i + 1,
+            "category":    "object",
+            "score":       float(m["predicted_iou"]),
+            "box":         [x * inv, y * inv, (x + w) * inv, (y + h) * inv],
+            "mask_raw":    mask_full,
+            "mask_thresh": 0.5,
+        })
+    return detections
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 _LOADERS = {
     "maskrcnn_r50v2": _load_maskrcnn_r50v2,
-    "sam_vitb":    _load_sam_vitb,
+    "sam_vitb":       _load_sam_vitb,
+    "sam2_small":     _load_sam2,
 }
 
 _INFER = {
     "maskrcnn_r50v2": _infer_maskrcnn_r50v2,
-    "sam_vitb":    _infer_sam_vitb,
+    "sam_vitb":       _infer_sam_vitb,
+    "sam2_small":     _infer_sam2,
 }
 
 
@@ -210,6 +283,8 @@ def run_inference(
     img_np = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
     if model_key == "sam_vitb":
         detections = _infer_sam_vitb(img_np, score_thresh, mask_thresh, sam_quality)
+    elif model_key == "sam2_small":
+        detections = _infer_sam2(img_np, score_thresh, mask_thresh, sam_quality)
     else:
         detections = _INFER[model_key](img_np, score_thresh, mask_thresh)
     return img_np, detections
