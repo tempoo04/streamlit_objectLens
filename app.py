@@ -23,14 +23,14 @@ if uploaded is None:
     st.markdown(
         "ObjectLens uses instance segmentation models to detect and segment individual objects, "
         "then computes shape descriptors — roundness, aspect ratio, eccentricity — for every instance. "
-        "Choose between **Mask R-CNN ResNet-50 v2** and **SAM ViT-B** from the sidebar. "
+        "Choose between **Mask R-CNN ResNet-50 v2**, **SAM ViT-B**, and **SAM2 Hiera-S** from the sidebar. "
         "Works best with clearly separated small objects: coins, seeds, pills, fruits, screws, etc."
     )
     st.info("⬅  Upload an image and select a model in the sidebar to get started.")
 else:
     image_bytes = uploaded.read()
 
-    with st.spinner(f"Running inference…"):
+    with st.spinner("Running inference…"):
         img_np, detections = run_inference(
             image_bytes,
             params["model_key"],
@@ -52,7 +52,7 @@ else:
         with col_img:
             st.markdown('<p class="section-label">Annotated image</p>', unsafe_allow_html=True)
             overlay = render_overlay(img_np, objects, params["color_by"])
-            st.image(overlay, use_column_width=True)
+            st.image(overlay, use_container_width=True)
 
         with col_chart:
             metric = params["chart_metric"]
