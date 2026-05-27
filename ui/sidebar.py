@@ -18,7 +18,7 @@ _SAM_QUALITY_LABELS = {
 def render_sidebar() -> dict:
     """Render sidebar controls and return all parameter values as a dict."""
     with st.sidebar:
-        st.markdown('<p class="app-title">StreamLENS</p>', unsafe_allow_html=True)
+        st.markdown('<p class="app-title">ObjectLens</p>', unsafe_allow_html=True)
         st.markdown('<p class="app-sub">small-object instance analyzer</p>', unsafe_allow_html=True)
 
         # ── input ──────────────────────────────────────────────────────────

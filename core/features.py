@@ -30,8 +30,10 @@ def compute_features(detections: list) -> tuple[pd.DataFrame, list]:
         roundness  = (4 * np.pi * area / perimeter ** 2) if perimeter > 0 else 0.0
 
         x1, y1, x2, y2 = det["box"]
-        w, h = x2 - x1, y2 - y1
-        aspect_ratio = float(w / h) if h > 0 else 1.0
+        w, h = abs(x2 - x1), abs(y2 - y1)
+        short_side = min(w, h)
+        long_side = max(w, h)
+        aspect_ratio = float(long_side / short_side) if short_side > 0 else 1.0
 
         if len(cnt) >= 5:
             axes = cv2.fitEllipse(cnt)[1]

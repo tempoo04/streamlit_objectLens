@@ -51,7 +51,7 @@ def render_table_and_download(df: pd.DataFrame) -> None:
 
     csv = df[_DISPLAY_COLS].to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="⬇  Download results.csv",
+        label="Download results.csv",
         data=csv,
         file_name="objectlens_results.csv",
         mime="text/csv",
