@@ -2,10 +2,9 @@ import streamlit as st
 
 
 def inject_styles() -> None:
-    """Inject global CSS to match the StreamLENS design system."""
+    """Inject global CSS for the ObjectLens Streamlit app."""
     st.markdown("""
 <style>
-  #MainMenu, footer, header { visibility: hidden; }
   .block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
 
   [data-testid="metric-container"] {
@@ -37,12 +36,12 @@ def inject_styles() -> None:
     letter-spacing: 0.05em;
   }
   .stDownloadButton button {
-    border: 0.5px solid #378ADD !important;
-    color: #378ADD !important;
+    border: 1px solid #2563eb !important;
+    color: #2563eb !important;
     background: transparent !important;
     font-size: 13px !important;
   }
-  .stDownloadButton button:hover { background: #e6f1fb !important; }
+  .stDownloadButton button:hover { background: #eff6ff !important; }
 
   .section-label {
     font-size: 11px; font-weight: 500; color: #999;
@@ -55,9 +54,9 @@ def inject_styles() -> None:
   }
   .app-sub { font-size: 13px; color: #999; margin-top: -4px; margin-bottom: 16px; }
   .info-box {
-    background: #f0f7ff; border: 0.5px solid #b5d4f4;
+    background: #f8fafc; border: 1px solid #e2e8f0;
     border-radius: 8px; padding: 8px 12px;
-    font-size: 12px; color: #185fa5; margin-top: 8px;
+    font-size: 12px; color: #334155; margin-top: 8px;
   }
 </style>
 """, unsafe_allow_html=True)

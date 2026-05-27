@@ -15,11 +15,11 @@ Detection dict schema returned by all inference functions:
 from __future__ import annotations
 import io
 import os
+from pathlib import Path
 import numpy as np
 from PIL import Image
 import streamlit as st
 import torch
-import torchvision  # must be fully initialized before sam2 imports torchvision.ops.boxes
 
 # module-level torch defaults — CPU inference benefits, GPU unaffected
 torch.set_grad_enabled(False)
@@ -29,6 +29,10 @@ except Exception:
     pass
 
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+class InferenceError(RuntimeError):
+    """User-facing inference failure that can be shown without a traceback."""
 
 # ── registry ──────────────────────────────────────────────────────────────────
 MODELS: dict[str, str] = {
@@ -46,6 +50,7 @@ _MASKRCNN_MAX_SIDE = 1024
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
 def _load_maskrcnn_r50v2():
+    import torchvision  # noqa: F401 - fully initialize torchvision before loading detection ops
     from torchvision.models.detection import (
         maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights,
     )
@@ -132,16 +137,16 @@ def _load_sam_vitb_backbone():
     from segment_anything import sam_model_registry
     import urllib.request
 
-    weights_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "weights"))
-    os.makedirs(weights_dir, exist_ok=True)
-    ckpt = os.path.join(weights_dir, "sam_vit_b_01ec64.pth")
+    weights_dir = Path(os.getenv("OBJECTLENS_WEIGHTS_DIR", Path(__file__).resolve().parent.parent / "weights"))
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    ckpt = weights_dir / "sam_vit_b_01ec64.pth"
     url  = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
 
-    if not os.path.exists(ckpt):
+    if not ckpt.exists():
         with st.spinner("Downloading SAM ViT-B weights (~375 MB) — once only…"):
             urllib.request.urlretrieve(url, ckpt)
 
-    sam = sam_model_registry["vit_b"](checkpoint=ckpt)
+    sam = sam_model_registry["vit_b"](checkpoint=str(ckpt))
     sam.to(_DEVICE)
     return sam
 
@@ -205,6 +210,7 @@ def _infer_sam_vitb(
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource
 def _load_sam2_backbone():
+    import torchvision  # noqa: F401 - sam2 imports torchvision ops during model construction
     from sam2.build_sam import build_sam2_hf
 
     torch._dynamo.config.suppress_errors = True
@@ -275,6 +281,8 @@ _LOADERS = {
 
 def load_model(key: str):
     """Pre-warm the selected model. Optional — inference also triggers load."""
+    if key not in _LOADERS:
+        raise InferenceError(f"Unknown model key: {key}")
     return _LOADERS[key]()
 
 
@@ -291,11 +299,29 @@ def run_inference(
     Unified inference entry point. Result is cached by (image, model, thresholds).
     Changing overlay color or chart metric never re-runs inference.
     """
-    img_np = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    if model_key == "sam_vitb":
-        detections = _infer_sam_vitb(img_np, score_thresh, mask_thresh, sam_quality, min_area)
-    elif model_key == "sam2_small":
-        detections = _infer_sam2(img_np, score_thresh, mask_thresh, sam_quality, min_area)
-    else:
-        detections = _infer_maskrcnn_r50v2(img_np, score_thresh, mask_thresh)
+    try:
+        img_np = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+    except Exception as exc:
+        raise InferenceError("The uploaded file could not be opened as an image.") from exc
+
+    try:
+        if model_key == "sam_vitb":
+            detections = _infer_sam_vitb(img_np, score_thresh, mask_thresh, sam_quality, min_area)
+        elif model_key == "sam2_small":
+            detections = _infer_sam2(img_np, score_thresh, mask_thresh, sam_quality, min_area)
+        elif model_key == "maskrcnn_r50v2":
+            detections = _infer_maskrcnn_r50v2(img_np, score_thresh, mask_thresh)
+        else:
+            raise InferenceError(f"Unknown model key: {model_key}")
+    except InferenceError:
+        raise
+    except ModuleNotFoundError as exc:
+        raise InferenceError(
+            f"The selected model backend is not installed: {exc.name}. Check requirements.txt and redeploy."
+        ) from exc
+    except OSError as exc:
+        raise InferenceError(f"The selected model could not load its weights: {exc}") from exc
+    except Exception as exc:
+        raise InferenceError(f"Inference failed: {exc}") from exc
+
     return img_np, detections

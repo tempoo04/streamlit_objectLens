@@ -1,6 +1,6 @@
-# StreamLENS 🔬
+# ObjectLens
 
-Upload a photo of small objects — coins, seeds, pills, screws, fruits — and ObjectLens will detect, segment, and measure every instance using **Mask R-CNN ResNet-50 FPN v2** or **SAM ViT-B**, both pretrained on COCO/SA-1B.
+Upload a photo of small objects, and ObjectLens detects, segments, and measures every instance using **Mask R-CNN ResNet-50 FPN v2**, **SAM ViT-B**, or **SAM2 Hiera-S**.
 
 ---
 
@@ -14,7 +14,39 @@ Upload a photo of small objects — coins, seeds, pills, screws, fruits — and 
 
 ---
 
-Mask R-CNN weights (~170 MB) download automatically via torchvision on first run. SAM ViT-B weights (~375 MB) download once to `weights/`.
+Mask R-CNN weights download automatically through torchvision on first run. SAM ViT-B downloads to `weights/` by default, or to the directory configured in `OBJECTLENS_WEIGHTS_DIR`. SAM2 downloads through Hugging Face cache.
+
+---
+
+## Run locally
+
+Use Python 3.11.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Run the deterministic core tests:
+
+```bash
+python -m unittest discover
+```
+
+---
+
+## Deployment
+
+The repository includes Streamlit deployment defaults in `.streamlit/config.toml` and pins Python through `.python-version`.
+
+For Streamlit Community Cloud or similar platforms:
+
+1. Set the app entry point to `app.py`.
+2. Use Python 3.11.
+3. Ensure the host has enough memory for PyTorch model loading. SAM/SAM2 are heavier than Mask R-CNN.
+4. Do not commit downloaded model files. `weights/` is ignored by git.
 
 ---
 
@@ -23,9 +55,13 @@ Mask R-CNN weights (~170 MB) download automatically via torchvision on first run
 ```
 objectlens/
 ├── app.py              # entrypoint — wires everything together
+├── .streamlit/
+│   └── config.toml     # deployment/runtime config
+├── tests/
+│   └── test_core.py    # deterministic tests for features and overlay
 ├── requirements.txt
 ├── core/
-│   ├── model.py        # Mask R-CNN loading & inference
+│   ├── model.py        # model loading and inference
 │   ├── features.py     # shape descriptor computation
 │   └── overlay.py      # mask colorization & rendering
 └── ui/
@@ -41,13 +77,13 @@ objectlens/
 | Metric | Formula | Range |
 |---|---|---|
 | Roundness | `4π · area / perimeter²` | 0–1 (1 = perfect circle) |
-| Aspect ratio | `bbox width / bbox height` | ≥ 1 |
+| Aspect ratio | `max(width, height) / min(width, height)` | ≥ 1 |
 | Eccentricity | from fitted ellipse `√(1 − (minor/major)²)` | 0–1 (0 = circle) |
 
 ---
 
 ## Stack
 
-`streamlit` · `torchvision` · `segment-anything` · `opencv-python` · `pandas` · `plotly`
+`streamlit` · `torch` · `torchvision` · `segment-anything` · `sam2` · `opencv-python-headless` · `pandas` · `plotly`
 
 ---

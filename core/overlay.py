@@ -37,7 +37,7 @@ def render_overlay(img_np: np.ndarray, objects: list, color_by: str) -> np.ndarr
     """
     overlay = img_np.copy().astype(np.float32)
 
-    metric_min, metric_max = None, None
+    metric_min, metric_max = 0.0, 1.0
     if color_by != "instance":
         vals = [o[color_by] for o in objects if color_by in o]
         if vals:
